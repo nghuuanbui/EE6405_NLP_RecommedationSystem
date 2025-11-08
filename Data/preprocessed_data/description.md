@@ -3,6 +3,7 @@ Output directory
 data/
  └── Electronics/
       ├── items.parquet
+      ├── items.jsonl
       ├── train.jsonl
       ├── valid.jsonl
       ├── test.jsonl
