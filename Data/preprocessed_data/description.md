@@ -24,6 +24,8 @@ parent_asin: unique item identifier
 
 item_text: concatenated and token-limited description (256 tokens)
 
+*Note: items.jsonl is the json version of items.parquet
+
 
 🟦 2. train.jsonl
 
