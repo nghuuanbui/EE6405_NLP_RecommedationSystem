@@ -1,27 +1,30 @@
-# Preprocessing → Artifacts for Dual-Tower/KNN retrieval
-# ------------------------------------------------------
-# Inputs (same folder):
+
+# Script for preprocessing data  to get Artifacts for Dual-Tower/KNN retrieval
+
+# Inputs:
 #   Electronics.train.csv  (user_id,parent_asin,rating,timestamp)
-#   Electronics.valid.csv  (same; may include 'history' column)
-#   Electronics.test.csv   (same; may include 'history' column)
+#   Electronics.valid.csv  
+#   Electronics.test.csv   
 #   meta_Electronics.jsonl (per-item metadata)
-#
-# Outputs (in ./data/Electronics/):
+
+
+# Outputs with format:
 #   items.parquet       (parent_asin, item_text)
 #   train.jsonl         ({user_id, user_idx, history[int], target[int], ts})
 #   valid.jsonl
 #   test.jsonl
 #   mappings.json       ({item2idx, user2idx})
 
-import os, json, re, gzip, math, itertools, argparse
+
+import json, re, gzip, argparse
 from pathlib import Path
 from typing import Dict, List, Tuple, Iterable, Optional
 
 import pandas as pd
 
-# -----------------------
+
 # Optional GPU backend (cuDF)
-# -----------------------
+
 def _probe_gpu_backend():
     try:
         import cudf  # type: ignore
@@ -35,24 +38,22 @@ def _probe_gpu_backend():
 USE_GPU = False
 GPU_AVAILABLE = _probe_gpu_backend()
 
-# -----------------------
-# Config
-# -----------------------
+
 CATEGORY = "Electronics"
-INPUT_DIR = Path("./raw_data")                      # where CSVs and meta JSONL live
+INPUT_DIR = Path("./raw_data")                      
 OUT_DIR = Path("./preprocessed_data") / CATEGORY
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# History length for training triples (you can vary later)
-HIST_K = 10
 
-# Target max tokens for text encoder (RoBERTa 512–768 tokens)
-# We'll use a conservative ~640 word-token cap using whitespace splitting.
+HIST_K = 10 # Length of history
+
+# Set target max tokens for text encoder (RoBERTa 512–768 tokens)
+# Use a conservative ~640 word-token cap using whitespace splitting.
 MAX_TOKENS = 256
 
-# -----------------------
-# Helpers
-# -----------------------
+
+# Helper functions
+
 def read_interactions_csv(path: Path) -> pd.DataFrame:
     """Read an interactions CSV. Expected columns:
        user_id,parent_asin,rating,timestamp[,history]"""
@@ -72,7 +73,7 @@ def read_interactions_csv(path: Path) -> pd.DataFrame:
     return df
 
 def read_jsonl_any(path: Path) -> Iterable[dict]:
-    """Read jsonl or jsonl.gz seamlessly."""
+    """Read jsonl or jsonl.gz file."""
     open_fn = gzip.open if path.suffix == ".gz" else open
     with open_fn(path, "rt", encoding="utf-8") as f:
         for line in f:
@@ -174,9 +175,9 @@ def load_metadata(meta_path: Path) -> pd.DataFrame:
     meta_df = pd.DataFrame(rows).drop_duplicates(subset=["parent_asin"])
     return meta_df
 
-# -----------------------
+
 # GPU/CPU dataframe helpers
-# -----------------------
+
 def _to_gdf(df: pd.DataFrame):
     import cudf  # type: ignore
     return cudf.from_pandas(df)
@@ -186,7 +187,7 @@ def _to_pdf(gdf):
     return gdf.to_pandas()
 
 def filter_to_intersection(items_df, inter_df):
-    """Return rows of items_df where parent_asin ∈ inter_df.parent_asin."""
+    """Return rows of items_df where parent_asin is in inter_df.parent_asin."""
     if USE_GPU:
         import cudf  # type: ignore
         keep = inter_df["parent_asin"].astype("str").dropna().unique()
@@ -233,8 +234,11 @@ def sort_interactions(df):
 
 def make_train_triples(df_train: pd.DataFrame, item2idx: Dict[str,int], user2idx: Dict[str,int], k_hist: int = HIST_K) -> Iterable[dict]:
     """
-    For each user’s chronological sequence: for step t>=1,
-    emit (history[:k] -> next_item).
+    Function transforms each user’s chronological interaction history into training triples (user, history, target)
+    
+    k_hist controls how many recent items are included in each history window.
+
+    
     """
     for uid, grp in df_train.groupby("user_id", sort=False):
         seq_items = [asin for asin in grp["parent_asin"].tolist() if asin in item2idx]
@@ -310,9 +314,7 @@ def write_jsonl(path: Path, rows: Iterable[dict]) -> int:
             n += 1
     return n
 
-# -----------------------
-# Main
-# -----------------------
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Preprocess Amazon 5-core for dual-tower/KNN")
     parser.add_argument("--gpu", action="store_true", help="Use cuDF on GPU when available")
@@ -322,9 +324,7 @@ if __name__ == "__main__":
     if args.gpu and not USE_GPU:
         print("[warn] --gpu requested but cuDF/CUDA not available; falling back to CPU.")
 
-    # -----------------------
-    # Load inputs
-    # -----------------------
+    # Load train, val, test
     train_path = INPUT_DIR / f"{CATEGORY}.train.csv"
     valid_path = INPUT_DIR / f"{CATEGORY}.valid.csv"
     test_path  = INPUT_DIR / f"{CATEGORY}.test.csv"
@@ -338,7 +338,7 @@ if __name__ == "__main__":
     print("Reading metadata...")
     items_df_pd = load_metadata(meta_path)[["parent_asin", "item_text"]]
 
-    # Optionally move to GPU
+    
     if USE_GPU:
         import cudf  # type: ignore
         df_train = _to_gdf(df_train_pd)
@@ -349,9 +349,9 @@ if __name__ == "__main__":
         df_train, df_valid, df_test = df_train_pd, df_valid_pd, df_test_pd
         items_df = items_df_pd
 
-    # -----------------------
-    # Keep only intersecting items
-    # -----------------------
+   
+    # Keep only overlapping items
+    
     print("Filtering to intersection (items with interactions + text)...")
     if USE_GPU:
         import cudf  # type: ignore
@@ -366,16 +366,16 @@ if __name__ == "__main__":
         )
     items_df = filter_to_intersection(items_df, inter_all)
 
-    # -----------------------
+    
     # Sort interactions chronologically (per user)
-    # -----------------------
+    
     df_train = sort_interactions(df_train)
     df_valid = sort_interactions(df_valid)
     df_test  = sort_interactions(df_test)
 
-    # -----------------------
+    
     # Build mappings
-    # -----------------------
+    
     if USE_GPU:
         import cudf  # type: ignore
         inter_df_all = cudf.concat([df_train, df_valid, df_test], axis=0, ignore_index=True)
@@ -393,9 +393,7 @@ if __name__ == "__main__":
 
     print(f"Items kept: {n_items:,} | Users: {n_users:,}")
 
-    # -----------------------
-    # Write items.parquet
-    # -----------------------
+    
     items_out = OUT_DIR / "items.parquet"
     if USE_GPU:
         # cuDF can write parquet directly
@@ -407,14 +405,12 @@ if __name__ == "__main__":
         items_df_pd_head = items_df.head(3)
     print(f"Wrote {items_out} ({n_items:,} rows)")
 
-    # -----------------------
-    # Move to pandas for JSONL generation (Pythonic iteration)
-    # -----------------------
+    
     if USE_GPU:
         df_train_pd = _to_pdf(df_train)
         df_valid_pd = _to_pdf(df_valid)
         df_test_pd  = _to_pdf(df_test)
-        # Ensure dtypes are friendly
+        # Convert dtypes to appropriate format.
         for _df in (df_train_pd, df_valid_pd, df_test_pd):
             _df["user_id"] = _df["user_id"].astype(str)
             _df["parent_asin"] = _df["parent_asin"].astype(str)
@@ -422,38 +418,38 @@ if __name__ == "__main__":
     else:
         df_train_pd, df_valid_pd, df_test_pd = df_train, df_valid, df_test
 
-    # -----------------------
+  
     # Build & write train triples
-    # -----------------------
+  
     train_out = OUT_DIR / "train.jsonl"
     n_train = write_jsonl(train_out, make_train_triples(df_train_pd, item2idx, user2idx, HIST_K))
     print(f"Wrote {train_out} ({n_train:,} triples)")
 
-    # -----------------------
+  
     # Build & write valid triples
-    # -----------------------
+    
     valid_out = OUT_DIR / "valid.jsonl"
     n_valid = write_jsonl(valid_out, make_eval_rows(df_valid_pd, item2idx, user2idx, HIST_K))
     print(f"Wrote {valid_out} ({n_valid:,} rows)")
 
-    # -----------------------
+  
     # Build & write test triples
-    # -----------------------
+   
     test_out = OUT_DIR / "test.jsonl"
     n_test = write_jsonl(test_out, make_eval_rows(df_test_pd, item2idx, user2idx, HIST_K))
     print(f"Wrote {test_out} ({n_test:,} rows)")
 
-    # -----------------------
+   
     # Write mappings
-    # -----------------------
+   
     maps_out = OUT_DIR / "mappings.json"
     with open(maps_out, "w", encoding="utf-8") as f:
         json.dump({"item2idx": item2idx, "user2idx": user2idx}, f)
     print(f"Wrote {maps_out}")
 
-    # -----------------------
-    # Quick sanity prints
-    # -----------------------
+   
+    # Sanity check of the output
+ 
     print("\nSample items.parquet rows:")
     print(items_df_pd_head)
 
