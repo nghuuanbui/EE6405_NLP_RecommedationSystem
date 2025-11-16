@@ -153,27 +153,6 @@ PRODUCTS = {
 6. **Generate Recommendations:** Get personalized top-10 recommendations
 7. **Export Results:** Download recommendations as CSV
 
-### API-like Usage (Programmatic)
-
-```python
-from models.beauty_model import get_user_embedding_beauty, recommend_top_k_beauty
-from utils.beauty_loader import load_beauty_artifacts
-
-# Load model
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-artifacts = load_beauty_artifacts("./data/Beauty", device)
-
-# Get recommendations
-history_asins = ["B01CUPMQZE", "B076WQZGPM", "B000B658RI"]
-user_emb, invalid = get_user_embedding_beauty(history_asins, artifacts['checkpoint_data'])
-topk_idxs, topk_scores = recommend_top_k_beauty(user_emb, artifacts['checkpoint_data']['item_embs'], k=10)
-
-# Process results
-for idx, score in zip(topk_idxs, topk_scores):
-    asin = artifacts["idx2item"][idx]
-    print(f"{asin}: {score:.3f}")
-```
-
 ## Architecture Details
 
 ### Frontend
