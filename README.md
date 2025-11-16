@@ -18,39 +18,11 @@ This project implements a comprehensive recommendation pipeline from data prepro
 ```
 .
 ├── data_preprocessing/
-│   ├── preprocess_electronics.py
-│   ├── preprocess_beauty.py
-│   └── prepare_beauty_data.py
-│
+│   ├── data_preprocessing.py
 ├── model_training/
-│   ├── Architecture/
-│   │   └── ItemEmbeddings.py
-│   ├── config.py
-│   ├── data_loader/
-│   │   ├── amazon_loader.py
-│   │   └── sequence_builder.py
-│   ├── evaluation/
-│   │   └── metrics.py
-│   ├── features/
-│   │   └── sentiment_quality.py
-│   ├── models/
-│   │   ├── CombinedEmbedding.py
-│   │   ├── ItemEmbedding.py
-│   │   └── UserEmbeddings.py
-│   ├── training/
-│   │   ├── contrastive_loss.py
-│   │   ├── precompute.py
-│   │   └── trainer.py
-│   ├── utils/
-│   │   ├── checkpoint.py
-│   │   └── device.py
-│   ├── main.py
-│   └── requirements.txt
-│
 └── deployment/
     ├── app.py
     ├── requirements.txt
-    ├── README.md
     ├── config/
     │   ├── __init__.py
     │   └── product_config.py
