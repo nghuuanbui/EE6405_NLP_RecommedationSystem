@@ -1,6 +1,3 @@
-
-# Script for preprocessing data  to get Artifacts for Dual-Tower/KNN retrieval
-
 # Inputs:
 #   Electronics.train.csv  (user_id,parent_asin,rating,timestamp)
 #   Electronics.valid.csv  
@@ -27,9 +24,8 @@ import pandas as pd
 
 def _probe_gpu_backend():
     try:
-        import cudf  # type: ignore
-        import cupy as cp  # noqa: F401
-        # a quick device touch; if it fails, we fall back later
+        import cudf
+        import cupy as cp
         _ = cudf.Series([1, 2, 3]).sum()
         return True
     except Exception:
@@ -46,9 +42,6 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 HIST_K = 10 # Length of history
-
-# Set target max tokens for text encoder (RoBERTa 512–768 tokens)
-# Use a conservative ~640 word-token cap using whitespace splitting.
 MAX_TOKENS = 256
 
 
@@ -115,7 +108,6 @@ def normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 def truncate_tokens(text: str, max_tokens: int = MAX_TOKENS) -> str:
-    # Simple whitespace token proxy; robust and fast.
     toks = text.split()
     if len(toks) <= max_tokens:
         return text
@@ -176,22 +168,18 @@ def load_metadata(meta_path: Path) -> pd.DataFrame:
     return meta_df
 
 
-# GPU/CPU dataframe helpers
-
 def _to_gdf(df: pd.DataFrame):
-    import cudf  # type: ignore
+    import cudf 
     return cudf.from_pandas(df)
 
 def _to_pdf(gdf):
-    # cudf.DataFrame -> pandas.DataFrame
     return gdf.to_pandas()
 
 def filter_to_intersection(items_df, inter_df):
     """Return rows of items_df where parent_asin is in inter_df.parent_asin."""
     if USE_GPU:
-        import cudf  # type: ignore
+        import cudf
         keep = inter_df["parent_asin"].astype("str").dropna().unique()
-        # cudf supports isin with Series
         out = items_df[items_df["parent_asin"].isin(keep)]
         return out.reset_index(drop=True)
     else:
@@ -218,8 +206,7 @@ def sort_interactions(df):
     Returns the same kind (pandas or cuDF) as input.
     """
     if USE_GPU:
-        import cudf  # type: ignore
-        # cast and dropna
+        import cudf
         df = df.dropna(subset=["timestamp"])
         df["timestamp"] = df["timestamp"].astype("int64")
         df["user_id"] = df["user_id"].astype("str")
@@ -288,7 +275,6 @@ def make_eval_rows(df_eval: pd.DataFrame, item2idx: Dict[str,int], user2idx: Dic
                 "ts": ts,
             }
     else:
-        # Last-two policy per user: build 1 row using last-1 as target, preceding ≤K as history
         df_eval_sorted = sort_interactions(df_eval)
         for uid, grp in df_eval_sorted.groupby("user_id", sort=False):
             asins = [a for a in grp["parent_asin"].tolist() if a in item2idx]
@@ -328,7 +314,7 @@ if __name__ == "__main__":
     train_path = INPUT_DIR / f"{CATEGORY}.train.csv"
     valid_path = INPUT_DIR / f"{CATEGORY}.valid.csv"
     test_path  = INPUT_DIR / f"{CATEGORY}.test.csv"
-    meta_path  = INPUT_DIR / f"meta_{CATEGORY}.jsonl"  # or .jsonl.gz
+    meta_path  = INPUT_DIR / f"meta_{CATEGORY}.jsonl"
 
     print("Reading interactions...")
     df_train_pd = read_interactions_csv(train_path)
@@ -340,7 +326,7 @@ if __name__ == "__main__":
 
     
     if USE_GPU:
-        import cudf  # type: ignore
+        import cudf 
         df_train = _to_gdf(df_train_pd)
         df_valid = _to_gdf(df_valid_pd)
         df_test  = _to_gdf(df_test_pd)
@@ -350,11 +336,11 @@ if __name__ == "__main__":
         items_df = items_df_pd
 
    
-    # Keep only overlapping items
+    # Keep overlapping items only
     
     print("Filtering to intersection (items with interactions + text)...")
     if USE_GPU:
-        import cudf  # type: ignore
+        import cudf 
         inter_all = cudf.concat(
             [df_train[["parent_asin"]], df_valid[["parent_asin"]], df_test[["parent_asin"]]],
             axis=0, ignore_index=True,
@@ -377,7 +363,7 @@ if __name__ == "__main__":
     # Build mappings
     
     if USE_GPU:
-        import cudf  # type: ignore
+        import cudf 
         inter_df_all = cudf.concat([df_train, df_valid, df_test], axis=0, ignore_index=True)
     else:
         inter_df_all = pd.concat([df_train, df_valid, df_test], axis=0)
@@ -385,7 +371,6 @@ if __name__ == "__main__":
 
     if USE_GPU:
         n_items = int(items_df.shape[0])
-        # for users we used inter_df_all unique in build_mappings
         n_users = len(user2idx)
     else:
         n_items = len(items_df)
@@ -396,9 +381,7 @@ if __name__ == "__main__":
     
     items_out = OUT_DIR / "items.parquet"
     if USE_GPU:
-        # cuDF can write parquet directly
         items_df.to_parquet(items_out)
-        # also create a small pandas head printout later
         items_df_pd_head = _to_pdf(items_df.head(3))
     else:
         items_df.to_parquet(items_out, index=False)
@@ -419,21 +402,21 @@ if __name__ == "__main__":
         df_train_pd, df_valid_pd, df_test_pd = df_train, df_valid, df_test
 
   
-    # Build & write train triples
+    # Build & write train set
   
     train_out = OUT_DIR / "train.jsonl"
     n_train = write_jsonl(train_out, make_train_triples(df_train_pd, item2idx, user2idx, HIST_K))
     print(f"Wrote {train_out} ({n_train:,} triples)")
 
   
-    # Build & write valid triples
+    # Build & write valid set
     
     valid_out = OUT_DIR / "valid.jsonl"
     n_valid = write_jsonl(valid_out, make_eval_rows(df_valid_pd, item2idx, user2idx, HIST_K))
     print(f"Wrote {valid_out} ({n_valid:,} rows)")
 
   
-    # Build & write test triples
+    # Build & write test set
    
     test_out = OUT_DIR / "test.jsonl"
     n_test = write_jsonl(test_out, make_eval_rows(df_test_pd, item2idx, user2idx, HIST_K))
